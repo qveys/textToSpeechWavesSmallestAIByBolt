@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Loader2, Volume2, Download, AlertCircle } from 'lucide-react';
 import type { ChunkStatus, APIError } from '../types';
 import { splitTextIntoChunks, concatenateAudioChunks, textToSpeech } from '../utils/textProcessing';
@@ -11,27 +11,42 @@ export default function TextToSpeechConverter() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
+  // Cleanup function for audio URL
+  const cleanupAudioUrl = () => {
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+    }
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cleanupAudioUrl();
+    };
+  }, []);
+
   const handleConvert = async () => {
     if (!text.trim()) {
       setError('Please enter some text to convert');
       return;
     }
 
-    setError(null);
-    setIsProcessing(true);
-    setAudioUrl(null);
-
-    const textChunks = splitTextIntoChunks(text);
-    const initialChunks: ChunkStatus[] = textChunks.map((text, id) => ({
-      id,
-      text,
-      status: 'pending'
-    }));
-    setChunks(initialChunks);
-
-    const audioChunks: ArrayBuffer[] = [];
-
     try {
+      setError(null);
+      setIsProcessing(true);
+      cleanupAudioUrl();
+      setAudioUrl(null);
+
+      const textChunks = splitTextIntoChunks(text);
+      const initialChunks: ChunkStatus[] = textChunks.map((text, id) => ({
+        id,
+        text,
+        status: 'pending'
+      }));
+      setChunks(initialChunks);
+
+      const audioChunks: ArrayBuffer[] = [];
+
       for (let i = 0; i < textChunks.length; i++) {
         setChunks(prev => prev.map(chunk => 
           chunk.id === i ? { ...chunk, status: 'processing' } : chunk
@@ -41,13 +56,19 @@ export default function TextToSpeechConverter() {
         audioChunks.push(audioBuffer);
 
         setChunks(prev => prev.map(chunk => 
-          chunk.id === i ? { ...chunk, status: 'completed', audio: audioBuffer } : chunk
+          chunk.id === i ? { ...chunk, status: 'completed' } : chunk
         ));
       }
 
       const finalAudio = await concatenateAudioChunks(audioChunks);
       const url = URL.createObjectURL(finalAudio);
       setAudioUrl(url);
+
+      // Reset audio element
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.load();
+      }
     } catch (err) {
       console.error('Conversion error:', err);
       setError((err as Error).message || 'An error occurred during processing');
@@ -155,7 +176,13 @@ export default function TextToSpeechConverter() {
                     Download
                   </button>
                 </div>
-                <audio ref={audioRef} controls className="w-full" src={audioUrl}>
+                <audio 
+                  ref={audioRef}
+                  controls
+                  className="w-full"
+                  key={audioUrl}
+                  src={audioUrl}
+                >
                   Your browser does not support the audio element.
                 </audio>
               </div>
