@@ -9,30 +9,16 @@ export function AudioPlayer({ audioUrl }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
-    // Reset audio when URL changes
-    if (audioRef.current) {
-      audioRef.current.load();
-    }
+    audioRef.current?.load();
   }, [audioUrl]);
 
   const handleDownload = () => {
     const link = document.createElement('a');
     link.href = audioUrl;
-    link.download = 'converted-speech.wav';
+    link.download = 'audio.wav';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  const handleError = (e: React.SyntheticEvent<HTMLAudioElement, Event>) => {
-    console.error('Audio playback error:', e);
-    const audio = e.target as HTMLAudioElement;
-    if (audio.error) {
-      console.error('Audio error details:', {
-        code: audio.error.code,
-        message: audio.error.message
-      });
-    }
   };
 
   return (
@@ -47,15 +33,9 @@ export function AudioPlayer({ audioUrl }: AudioPlayerProps) {
           Télécharger
         </button>
       </div>
-      <audio 
-        ref={audioRef}
-        controls
-        className="w-full"
-        onError={handleError}
-        key={audioUrl}
-        src={audioUrl}
-      >
-        Votre navigateur ne prend pas en charge l'élément audio.
+      <audio ref={audioRef} controls className="w-full" key={audioUrl}>
+        <source src={audioUrl} type="audio/wav" />
+        Votre navigateur ne supporte pas l'élément audio.
       </audio>
     </div>
   );

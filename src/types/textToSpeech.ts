@@ -1,15 +1,16 @@
-export interface TextToSpeechResponse {
-  audio: ArrayBuffer;
-}
-
-export interface ChunkStatus {
+export interface AudioChunk {
   id: number;
   text: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
-  audio?: ArrayBuffer;
+  audioUrl: string | null;
 }
 
-export interface APIError {
-  message: string;
-  status?: number;
+export interface APIResponse {
+  audio: ArrayBuffer;
+}
+
+export interface WAVFormat {
+  sampleRate: number;
+  numChannels: number;
+  bitsPerSample: number;
 }

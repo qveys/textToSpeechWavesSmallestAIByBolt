@@ -1,66 +1,75 @@
 import { useState, useEffect } from 'react';
-import { ChunkStatus } from '../types/textToSpeech';
+import { AudioChunk } from '../types/textToSpeech';
 import { textToSpeech, splitTextIntoChunks, concatenateAudioChunks } from '../utils/textProcessing';
 
-export function useTextToSpeech() {
+export const useTextToSpeech = () => {
   const [text, setText] = useState('');
-  const [chunks, setChunks] = useState<ChunkStatus[]>([]);
+  const [chunks, setChunks] = useState<AudioChunk[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
+  // Nettoie les URLs audio lors du démontage
   useEffect(() => {
     return () => {
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl);
-      }
+      chunks.forEach(chunk => chunk.audioUrl && URL.revokeObjectURL(chunk.audioUrl));
+      audioUrl && URL.revokeObjectURL(audioUrl);
     };
-  }, [audioUrl]);
+  }, []);
 
   const handleConvert = async () => {
     if (!text.trim()) {
-      setError('Please enter some text to convert');
+      setError('Veuillez entrer du texte');
       return;
     }
 
     try {
       setError(null);
       setIsProcessing(true);
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl);
-      }
+      
+      // Nettoie les URLs précédentes
+      chunks.forEach(chunk => chunk.audioUrl && URL.revokeObjectURL(chunk.audioUrl));
+      audioUrl && URL.revokeObjectURL(audioUrl);
       setAudioUrl(null);
 
+      // Initialise les segments
       const textChunks = splitTextIntoChunks(text);
-      const initialChunks: ChunkStatus[] = textChunks.map((text, id) => ({
-        id,
-        text,
-        status: 'pending'
-      }));
-      setChunks(initialChunks);
+      setChunks(textChunks.map((text, id) => ({
+        id, text, status: 'pending', audioUrl: null
+      })));
 
-      const audioChunks: ArrayBuffer[] = [];
+      const audioBuffers: ArrayBuffer[] = [];
 
+      // Traite chaque segment
       for (let i = 0; i < textChunks.length; i++) {
-        setChunks(prev => prev.map(chunk => 
+        setChunks(prev => prev.map(chunk =>
           chunk.id === i ? { ...chunk, status: 'processing' } : chunk
         ));
 
-        const audioBuffer = await textToSpeech(textChunks[i]);
-        audioChunks.push(audioBuffer);
+        try {
+          if (i > 0) await new Promise(resolve => setTimeout(resolve, 10000));
+          
+          const buffer = await textToSpeech(textChunks[i]);
+          audioBuffers.push(buffer);
 
-        setChunks(prev => prev.map(chunk => 
-          chunk.id === i ? { ...chunk, status: 'completed' } : chunk
-        ));
+          const url = URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
+          setChunks(prev => prev.map(chunk =>
+            chunk.id === i ? { ...chunk, status: 'completed', audioUrl: url } : chunk
+          ));
+        } catch (error) {
+          setChunks(prev => prev.map(chunk =>
+            chunk.id === i ? { ...chunk, status: 'error' } : chunk
+          ));
+          throw error;
+        }
       }
 
-      const finalAudio = await concatenateAudioChunks(audioChunks);
-      const url = URL.createObjectURL(finalAudio);
-      setAudioUrl(url);
+      // Combine les segments audio
+      const finalAudio = await concatenateAudioChunks(audioBuffers);
+      setAudioUrl(URL.createObjectURL(finalAudio));
     } catch (err) {
-      console.error('Conversion error:', err);
-      setError((err as Error).message || 'An error occurred during processing');
-      setChunks(prev => prev.map(chunk => 
+      setError((err as Error).message);
+      setChunks(prev => prev.map(chunk =>
         chunk.status === 'processing' ? { ...chunk, status: 'error' } : chunk
       ));
     } finally {
@@ -68,13 +77,5 @@ export function useTextToSpeech() {
     }
   };
 
-  return {
-    text,
-    setText,
-    chunks,
-    isProcessing,
-    error,
-    audioUrl,
-    handleConvert,
-  };
-}
+  return { text, setText, chunks, isProcessing, error, audioUrl, handleConvert };
+};

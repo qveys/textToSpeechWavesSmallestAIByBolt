@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTextToSpeech } from '../../hooks/useTextToSpeech';
 import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
-import { ProcessingStatus } from '../ProcessingStatus/ProcessingStatus';
+import { ChunkPlayer } from '../ChunkPlayer/ChunkPlayer';
 import { TextInput } from '../TextInput/TextInput';
 import { ErrorMessage } from '../ErrorMessage/ErrorMessage';
 import { ConvertButton } from '../ConvertButton/ConvertButton';
@@ -37,11 +37,24 @@ export function TextToSpeechConverter() {
             />
 
             {chunks.length > 0 && (
-              <ProcessingStatus chunks={chunks} />
+              <div className="mt-6">
+                <h2 className="text-lg font-medium text-gray-900 mb-4">Individual Segments</h2>
+                {chunks.map((chunk) => (
+                  <ChunkPlayer
+                    key={chunk.id}
+                    chunkNumber={chunk.id}
+                    text={chunk.text}
+                    audioUrl={chunk.audioUrl}
+                    status={chunk.status}
+                  />
+                ))}
+              </div>
             )}
 
             {audioUrl && (
-              <AudioPlayer audioUrl={audioUrl} />
+              <div className="mt-8 pt-6 border-t border-gray-200">
+                <AudioPlayer audioUrl={audioUrl} />
+              </div>
             )}
           </div>
         </div>
