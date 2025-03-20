@@ -1,6 +1,34 @@
+const API_URL = 'https://waves-api.smallest.ai/api/v1/lightning/get_speech?unauthenticated=true';
+
+interface WAVFormat {
+  sampleRate: number;
+  numChannels: number;
+  bitsPerSample: number;
+}
+
+function getWAVFormat(buffer: ArrayBuffer): WAVFormat {
+  const view = new DataView(buffer);
+  return {
+    sampleRate: view.getUint32(24, true),
+    numChannels: view.getUint16(22, true),
+    bitsPerSample: view.getUint16(34, true)
+  };
+}
+
+function validateWAVFormat(buffer: ArrayBuffer): boolean {
+  const view = new DataView(buffer);
+  const riff = String.fromCharCode(
+    view.getUint8(0),
+    view.getUint8(1),
+    view.getUint8(2),
+    view.getUint8(3)
+  );
+  return riff === 'RIFF';
+}
+
 export async function textToSpeech(text: string): Promise<ArrayBuffer> {
   try {
-    const response = await fetch('https://waves-api.smallest.ai/api/v1/lightning/get_speech?unauthenticated=true', {
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -17,7 +45,16 @@ export async function textToSpeech(text: string): Promise<ArrayBuffer> {
       throw new Error(`API error (${response.status}): ${errorData}`);
     }
 
-    return await response.arrayBuffer();
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength === 0) {
+      throw new Error('Received empty audio buffer from API');
+    }
+
+    if (!validateWAVFormat(buffer)) {
+      throw new Error('Invalid WAV format received from API');
+    }
+
+    return buffer;
   } catch (error) {
     console.error('Text-to-speech error:', error);
     throw error;
@@ -47,58 +84,63 @@ export async function concatenateAudioChunks(audioChunks: ArrayBuffer[]): Promis
     throw new Error('No audio chunks to concatenate');
   }
 
-  // For a single chunk, return it directly
+  // Return single chunk directly
   if (audioChunks.length === 1) {
     return new Blob([audioChunks[0]], { type: 'audio/wav' });
   }
 
-  // Get the first chunk as a reference for the WAV header
-  const firstChunk = new Uint8Array(audioChunks[0]);
-  const sampleRate = new DataView(audioChunks[0]).getUint32(24, true);
-  const numChannels = new DataView(audioChunks[0]).getUint16(22, true);
-  const bitsPerSample = new DataView(audioChunks[0]).getUint16(34, true);
-
-  // Calculate total audio data size (excluding WAV headers)
-  let totalAudioSize = 0;
-  for (const chunk of audioChunks) {
-    totalAudioSize += chunk.byteLength - 44; // 44 is the WAV header size
+  // Validate all chunks have the same format
+  const firstFormat = getWAVFormat(audioChunks[0]);
+  for (let i = 1; i < audioChunks.length; i++) {
+    const format = getWAVFormat(audioChunks[i]);
+    if (format.sampleRate !== firstFormat.sampleRate ||
+        format.numChannels !== firstFormat.numChannels ||
+        format.bitsPerSample !== firstFormat.bitsPerSample) {
+      throw new Error(`Audio chunk ${i} has different format than the first chunk`);
+    }
   }
 
-  // Create the WAV header for the combined file
-  const header = new ArrayBuffer(44);
-  const view = new DataView(header);
+  try {
+    // Calculate total audio data size (excluding headers)
+    let totalAudioSize = 0;
+    for (const chunk of audioChunks) {
+      totalAudioSize += chunk.byteLength - 44; // 44 is the WAV header size
+    }
 
-  // Write WAV header
-  // "RIFF" chunk descriptor
-  view.setUint32(0, 0x46464952, false); // "RIFF" in ASCII
-  view.setUint32(4, 36 + totalAudioSize, true); // File size - 8
-  view.setUint32(8, 0x45564157, false); // "WAVE" in ASCII
+    // Create new WAV header
+    const header = new ArrayBuffer(44);
+    const view = new DataView(header);
 
-  // "fmt " sub-chunk
-  view.setUint32(12, 0x20746D66, false); // "fmt " in ASCII
-  view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
-  view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
-  view.setUint16(22, numChannels, true); // NumChannels
-  view.setUint32(24, sampleRate, true); // SampleRate
-  view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true); // ByteRate
-  view.setUint16(32, numChannels * (bitsPerSample / 8), true); // BlockAlign
-  view.setUint16(34, bitsPerSample, true); // BitsPerSample
+    // Write WAV header
+    view.setUint32(0, 0x46464952, false); // "RIFF"
+    view.setUint32(4, 36 + totalAudioSize, true); // File size - 8
+    view.setUint32(8, 0x45564157, false); // "WAVE"
+    view.setUint32(12, 0x20746D66, false); // "fmt "
+    view.setUint32(16, 16, true); // Subchunk1Size
+    view.setUint16(20, 1, true); // AudioFormat (PCM)
+    view.setUint16(22, firstFormat.numChannels, true);
+    view.setUint32(24, firstFormat.sampleRate, true);
+    view.setUint32(28, firstFormat.sampleRate * firstFormat.numChannels * (firstFormat.bitsPerSample / 8), true);
+    view.setUint16(32, firstFormat.numChannels * (firstFormat.bitsPerSample / 8), true);
+    view.setUint16(34, firstFormat.bitsPerSample, true);
+    view.setUint32(36, 0x61746164, false); // "data"
+    view.setUint32(40, totalAudioSize, true);
 
-  // "data" sub-chunk
-  view.setUint32(36, 0x61746164, false); // "data" in ASCII
-  view.setUint32(40, totalAudioSize, true); // Subchunk2Size
+    // Create final buffer and copy header
+    const finalBuffer = new Uint8Array(44 + totalAudioSize);
+    finalBuffer.set(new Uint8Array(header), 0);
 
-  // Create the final buffer
-  const finalBuffer = new Uint8Array(44 + totalAudioSize);
-  finalBuffer.set(new Uint8Array(header), 0);
+    // Copy audio data from each chunk
+    let offset = 44;
+    for (const chunk of audioChunks) {
+      const audioData = new Uint8Array(chunk).slice(44); // Skip WAV header
+      finalBuffer.set(audioData, offset);
+      offset += audioData.length;
+    }
 
-  // Copy audio data from each chunk
-  let offset = 44;
-  for (const chunk of audioChunks) {
-    const chunkData = new Uint8Array(chunk).slice(44);
-    finalBuffer.set(chunkData, offset);
-    offset += chunkData.length;
+    return new Blob([finalBuffer], { type: 'audio/wav' });
+  } catch (error) {
+    console.error('Error concatenating audio chunks:', error);
+    throw new Error('Failed to concatenate audio chunks: ' + error.message);
   }
-
-  return new Blob([finalBuffer], { type: 'audio/wav' });
 }

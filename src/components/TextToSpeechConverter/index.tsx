@@ -1,0 +1,1 @@
+export { TextToSpeechConverter as default } from './TextToSpeechConverter';
