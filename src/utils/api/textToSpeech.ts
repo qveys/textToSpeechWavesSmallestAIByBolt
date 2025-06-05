@@ -2,14 +2,22 @@ import { detectLanguage } from '../language/detection';
 
 const API_URL = 'https://waves-api.smallest.ai/api/v1/lightning/get_speech?unauthenticated=true';
 
+let lastCall = 0;
+
 export const textToSpeech = async (text: string): Promise<ArrayBuffer> => {
+  // Throttle: attend au moins 2s entre chaque appel
+  const now = Date.now();
+  const wait = 2000 - (now - lastCall);
+  if (wait > 0) await new Promise(res => setTimeout(res, wait));
+  lastCall = Date.now();
+
   const maxRetries = 3;
   let attempt = 0;
 
   while (attempt < maxRetries) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
 
       const response = await fetch(API_URL, {
         method: 'POST',
@@ -20,7 +28,7 @@ export const textToSpeech = async (text: string): Promise<ArrayBuffer> => {
         },
         body: JSON.stringify({
           text,
-          voice_id: detectLanguage(text) === 'fr' ? 'julien' : 'arman',
+          voice_id: detectLanguage(text) === 'fr' ? 'emmanuel' : 'arman',
           speed: 1,
           sample_rate: 24000,
           transliterate: false,
