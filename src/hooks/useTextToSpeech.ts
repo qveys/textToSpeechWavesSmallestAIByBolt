@@ -34,9 +34,13 @@ export const useTextToSpeech = () => {
 
       // Initialise les segments
       const textChunks = splitTextIntoChunks(text);
-      setChunks(textChunks.map((text, id) => ({
-        id, text, status: 'pending', audioUrl: null
-      })));
+      setChunks(prevChunks => {
+        // Fusionne les anciens et nouveaux chunks par texte
+        return textChunks.map((chunkText, id) => {
+          const existing = prevChunks.find(c => c.text === chunkText);
+          return existing ? existing : { id, text: chunkText, status: 'pending', audioUrl: null };
+        });
+      });
 
       const audioBuffers: ArrayBuffer[] = [];
 
