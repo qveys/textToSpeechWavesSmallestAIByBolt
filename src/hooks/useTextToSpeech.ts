@@ -42,6 +42,11 @@ export const useTextToSpeech = () => {
 
       // Traite chaque segment
       for (let i = 0; i < textChunks.length; i++) {
+        // Vérifie si un enregistrement existe déjà pour ce chunk
+        if (chunks[i] && chunks[i].audioUrl) {
+          // On considère ce chunk comme déjà traité
+          continue;
+        }
         setChunks(prev => prev.map(chunk =>
           chunk.id === i ? { ...chunk, status: 'processing' } : chunk
         ));
