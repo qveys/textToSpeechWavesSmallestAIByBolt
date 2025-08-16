@@ -1,6 +1,20 @@
 import { detectLanguage } from '../language/detection';
 
-const API_URL = 'https://waves-api.smallest.ai/api/v1/lightning/get_speech?unauthenticated=true';
+const API_URL = 'https://api.sws.speechify.com/v1/audio/speech';
+const API_KEY = '7jnogIA3AY00cDWGnx2hycCldPRh-HNh-z-1ZMlLYSU=';
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  if (typeof atob !== 'function') {
+    throw new Error('atob is not available. This function must run in a browser environment.');
+  }
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
 
 let lastCall = 0;
 
@@ -19,79 +33,52 @@ export const textToSpeech = async (text: string): Promise<ArrayBuffer> => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
 
+      const voice_id = detectLanguage(text) === 'fr' ? 'raphael' : 'oliver';
+
       const response = await fetch(API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Origin': 'https://waves.smallest.ai',
-          'Referer': 'https://waves.smallest.ai/'
+          'Authorization': `Bearer ${API_KEY}`
         },
         body: JSON.stringify({
-          text,
-          voice_id: detectLanguage(text) === 'fr' ? 'emmanuel' : 'arman',
-          speed: 1,
-          sample_rate: 24000,
-          transliterate: false,
-          add_wav_header: true,
-          save_history: true,
-          enhancement: 1,
-          similarity: 0,
-          is_pvc: false
+          input: text,
+          voice_id,
+          language: detectLanguage(text) === 'fr' ? 'fr-FR' : 'en',
+          model: 'simba-multilingual'
         }),
         signal: controller.signal
-      }).finally(() => clearTimeout(timeoutId));
+      });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
-        let errorMessage: string;
-        
+        let errorMessage = errorText;
         try {
           const errorJson = JSON.parse(errorText);
           errorMessage = errorJson.error || errorText;
-        } catch {
-          errorMessage = errorText;
-        }
-
-        if (response.status === 429) {
-          throw new Error('API rate limit exceeded. Please try again later or sign up for an API key at https://smallest.ai');
-        } else if (response.status === 403) {
-          throw new Error('Access to the API is forbidden. Please check your API credentials.');
-        } else if (response.status === 404) {
-          throw new Error('The API endpoint could not be found. Please check the API URL.');
-        } else if (response.status === 401) {
-          throw new Error('Unauthorized: Please log in at https://waves.smallest.ai first');
-        }
-        
-        throw new Error(`API error (${response.status}): ${errorMessage}`);
+        } catch {}
+        throw new Error(`Speechify API error (${response.status}): ${errorMessage}`);
       }
 
-      const buffer = await response.arrayBuffer();
-      
-      if (!buffer.byteLength) {
-        throw new Error('Invalid audio format received');
+      const data = await response.json();
+      if (!data.audio_data) {
+        throw new Error('Speechify API: No audio_data in response');
       }
-
-      return buffer;
+      return base64ToArrayBuffer(data.audio_data);
     } catch (error) {
       if (error instanceof Error) {
         if (error.name === 'AbortError') {
           throw new Error('Request timed out. Please try again.');
         }
-        
-        if (error.message.includes('rate limit') || error.message.includes('Unauthorized')) {
-          throw error;
-        }
       }
-
       if (attempt < maxRetries - 1) {
         await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
         attempt++;
         continue;
       }
-
       throw error;
     }
   }
-  
-  throw new Error('Failed to connect to the API after multiple attempts');
+  throw new Error('Failed to connect to Speechify API after multiple attempts');
 };
